@@ -100,8 +100,12 @@ struct Sensors : public Module {
   array<StripeCounter, kNumKeyence>  keyence_stripe_counter;
 };
 
+//TODO CHANGE HERE UPDATE NEW DATA STRUCTURE
+//    For HP 2 packs, 1 per lim, each made up of 3 modules that are 11s1p, for a total of 33s1p per pack.
+//    For LP, the main pack is 10s1p, and redundant 8s1p I beleive.
+
 struct BatteryData {
-  static constexpr int kNumCells = 36;
+  static constexpr int kNumCells = 33;
   uint16_t  voltage;                    // dV
   int16_t   current;                    // dA
   uint8_t   charge;                     // %
@@ -115,6 +119,8 @@ struct BatteryData {
   uint16_t  high_voltage_cell;          // mV
   bool      imd_fault;
 };
+
+//TODO CHANGE HERE
 
 struct Batteries : public Module {
   static constexpr int kNumLPBatteries = 3;
