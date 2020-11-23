@@ -1,10 +1,9 @@
 
 /*
- * Authors: Kornelija Sukyte, Franz Miltz
+ * Authors: Kornelija Sukyte, Franz Miltz, Efe Ozbatur, Yining Wang
  * Organisation: HYPED
  * Date:
- * Description: Implements the concrete behaviour for each state based on the observations made by
- * the functions in transitions.(ch)pp
+ * Description:
  *
  *    Copyright 2020 HYPED
  *    Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,192 +24,297 @@ namespace hyped {
 
 namespace state_machine {
 
-//--------------------------------------------------------------------------------------
-//  General State
-//--------------------------------------------------------------------------------------
-
-State::State() : data_(data::Data::getInstance())
+State::State(Logger &log, Main *state_machine)
+    : log_(log),
+      data_(data::Data::getInstance()),
+      state_machine_(state_machine)
 {
 }
 
-void State::updateModuleData()
+void State::checkEmergencyStop()
 {
-  embrakes_data_  = data_.getEmergencyBrakesData();
-  nav_data_       = data_.getNavigationData();
-  batteries_data_ = data_.getBatteriesData();
-  telemetry_data_ = data_.getTelemetryData();
-  sensors_data_   = data_.getSensorsData();
-  motors_data_    = data_.getMotorData();
+  data::EmergencyBrakes embrakes_data = data_.getEmergencyBrakesData();
+  data::StateMachine sm_data          = data_.getStateMachineData();
+  data::Navigation nav_data           = data_.getNavigationData();
+  data::Batteries batteries_data      = data_.getBatteriesData();
+  data::Telemetry telemetry_data      = data_.getTelemetryData();
+  data::Motors motors_data            = data_.getMotorData();
+
+  bool encountered_failure = false;
+
+  if (telemetry_data.emergency_stop_command) {
+    encountered_failure = true;
+    log_.ERR("STM", "STOP command received");
+    telemetry_data.emergency_stop_command = false;
+    data_.setTelemetryData(telemetry_data);
+  } else if (nav_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in navigation");
+  } else if (telemetry_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in telemetry");
+  } else if (motors_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in motors");
+  } else if (embrakes_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in embrakes");
+  } else if (batteries_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in batteries");
+  }
+
+  if (encountered_failure) {
+    sm_data.current_state = data::State::kFailureStopped;
+    data_.setStateMachineData(sm_data);
+
+    state_machine_->current_state_ = state_machine_->failure_stopped_;
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Idle State
-//--------------------------------------------------------------------------------------
+// Idling state
 
-Idle Idle::instance_;
-data::State Idle::enum_value_       = data::kIdle;
-char Idle::string_representation_[] = "Idle";
-
-State *Idle::checkTransition(Logger &log)
+void Idling::transitionCheck()
 {
-  updateModuleData();
+  data::Telemetry telemetry_data = data_.getTelemetryData();
 
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureStopped::getInstance(); }
+  if (telemetry_data.calibrate_command) {
+    data::StateMachine sm_data   = data_.getStateMachineData();
+    data::Navigation nav_data    = data_.getNavigationData();
+    data::Batteries battery_data = data_.getBatteriesData();
+    data::Sensors sensors_data   = data_.getSensorsData();
+    data::Motors motors_data     = data_.getMotorData();
+    // TODO: Only check the individual conditions if they haven't been found to be true before.
+    // all modules must be initialised (except embrakes, they don't do that for some reason)
+    bool modules_init = telemetry_data.module_status == ModuleStatus::kInit
+                        && nav_data.module_status == ModuleStatus::kInit
+                        && motors_data.module_status == ModuleStatus::kInit
+                        && sensors_data.module_status == ModuleStatus::kInit
+                        && battery_data.module_status == ModuleStatus::kInit;
 
-  bool all_initialised = checkModulesInitialised(log, embrakes_data_, nav_data_, batteries_data_,
-                                                 telemetry_data_, sensors_data_, motors_data_);
-  if (all_initialised) { return Calibrating::getInstance(); }
+    if (modules_init) {
+      log_.INFO("STM", "calibrate command received and all modules initialised");
+      telemetry_data.calibrate_command = false;
+      data_.setTelemetryData(telemetry_data);
+      log_.DBG("STM", "calibrate command cleared");
 
-  return nullptr;
+      sm_data.current_state = data::State::kCalibrating;
+      data_.setStateMachineData(sm_data);
+
+      state_machine_->current_state_ = state_machine_->calibrating_;
+      log_.DBG("STM", "Transitioned to 'Calibrating'");
+    }
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Calibrating
-//--------------------------------------------------------------------------------------
+// Calibrating state
 
-Calibrating Calibrating::instance_;
-data::State Calibrating::enum_value_       = data::kCalibrating;
-char Calibrating::string_representation_[] = "Calibrating";
-
-State *Calibrating::checkTransition(Logger &log)
+void Calibrating::transitionCheck()
 {
-  updateModuleData();
+  data::EmergencyBrakes embrakes_data = data_.getEmergencyBrakesData();
+  data::StateMachine sm_data          = data_.getStateMachineData();
+  data::Navigation nav_data           = data_.getNavigationData();
+  data::Motors motors_data            = data_.getMotorData();
 
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureStopped::getInstance(); }
+  // TODO: Only check the individual conditions if they haven't been found to be true before.
+  // navigation, motors and embrakes must be ready
+  bool modules_ready = nav_data.module_status == ModuleStatus::kReady
+                       && motors_data.module_status == ModuleStatus::kReady
+                       && embrakes_data.module_status == ModuleStatus::kReady;
 
-  bool all_ready = checkModulesReady(log, embrakes_data_, nav_data_, motors_data_);
-  if (all_ready) { return Ready::getInstance(); }
+  if (modules_ready) {
+    log_.INFO("STM", "Calibration successful");
 
-  return nullptr;
+    sm_data.current_state = data::State::kReady;
+    data_.setStateMachineData(sm_data);
+
+    state_machine_->current_state_ = state_machine_->ready_;
+    log_.DBG("STM", "Transitioned to 'Ready'");
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Ready
-//--------------------------------------------------------------------------------------
+// Ready state
 
-Ready Ready::instance_;
-data::State Ready::enum_value_       = data::kReady;
-char Ready::string_representation_[] = "Ready";
-
-State *Ready::checkTransition(Logger &log)
+void Ready::transitionCheck()
 {
-  updateModuleData();
+  data::Telemetry telemetry_data = data_.getTelemetryData();
+  data::StateMachine sm_data     = data_.getStateMachineData();
 
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureStopped::getInstance(); }
+  if (telemetry_data.launch_command) {
+    log_.INFO("STM", "launch command received");
+    telemetry_data.launch_command = false;
+    data_.setTelemetryData(telemetry_data);
+    log_.DBG("STM", "launch command cleared");
 
-  bool recieved_launch_command = checkLaunchCommand(log, telemetry_data_);
-  if (recieved_launch_command) { return Accelerating::getInstance(); }
+    sm_data.current_state = data::State::kAccelerating;
+    data_.setStateMachineData(sm_data);
 
-  return nullptr;
+    state_machine_->current_state_ = state_machine_->accelerating_;
+    log_.DBG("STM", "Transitioned to 'Accelerating'");
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Accelerating
-//--------------------------------------------------------------------------------------
+// Accelerating state
 
-Accelerating Accelerating::instance_;
-data::State Accelerating::enum_value_       = data::kAccelerating;
-char Accelerating::string_representation_[] = "Accelerating";
-
-State *Accelerating::checkTransition(Logger &log)
+void Accelerating::checkEmergencyStop()
 {
-  updateModuleData();
+  data::EmergencyBrakes embrakes_data = data_.getEmergencyBrakesData();
+  data::StateMachine sm_data          = data_.getStateMachineData();
+  data::Navigation nav_data           = data_.getNavigationData();
+  data::Batteries batteries_data      = data_.getBatteriesData();
+  data::Telemetry telemetry_data      = data_.getTelemetryData();
+  data::Motors motors_data            = data_.getMotorData();
 
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureBraking::getInstance(); }
+  bool encountered_failure = false;
 
-  bool in_braking_zone = checkEnteredBrakingZone(log, nav_data_);
-  if (in_braking_zone) { return NominalBraking::getInstance(); }
+  if (telemetry_data.emergency_stop_command) {
+    encountered_failure = true;
+    log_.ERR("STM", "STOP command received");
+    telemetry_data.emergency_stop_command = false;
+    data_.setTelemetryData(telemetry_data);
+  } else if (nav_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in navigation");
+  } else if (telemetry_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in telemetry");
+  } else if (motors_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in motors");
+  } else if (embrakes_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in embrakes");
+  } else if (batteries_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in batteries");
+  }
 
-  return nullptr;
+  if (encountered_failure) {
+    log_.ERR("STM", "Engaging emergency brakes");
+    sm_data.current_state = data::State::kEmergencyBraking;
+    data_.setStateMachineData(sm_data);
+    state_machine_->current_state_ = state_machine_->failure_braking_;
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Nominal Braking
-//--------------------------------------------------------------------------------------
-
-NominalBraking NominalBraking::instance_;
-data::State NominalBraking::enum_value_       = data::kNominalBraking;
-char NominalBraking::string_representation_[] = "NominalBraking";
-
-State *NominalBraking::checkTransition(Logger &log)
+void Accelerating::transitionCheck()
 {
-  updateModuleData();
+  data::StateMachine sm_data     = data_.getStateMachineData();
+  data::Navigation nav_data      = data_.getNavigationData();
+  data::Telemetry telemetry_data = data_.getTelemetryData();
 
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureBraking::getInstance(); }
+  if (telemetry_data.run_length <= nav_data.displacement + nav_data.braking_distance) {
+    log_.INFO("STM", "max distance reached");
+    log_.INFO("STM", "current distance: %fm, braking distance: %fm", nav_data.displacement,
+              nav_data.braking_distance);
 
-  bool stopped = checkPodStopped(log, nav_data_);
-  if (stopped) { return Finished::getInstance(); }
-  return nullptr;
+    sm_data.current_state = data::State::kNominalBraking;
+    data_.setStateMachineData(sm_data);
+
+    state_machine_->current_state_ = state_machine_->nominal_braking_;
+    log_.DBG("STM", "Transitioned to 'Nominal Braking'");
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Finished
-//--------------------------------------------------------------------------------------
+// Braking state
 
-Finished Finished::instance_;
-data::State Finished::enum_value_       = data::kFinished;
-char Finished::string_representation_[] = "Finished";
-
-State *Finished::checkTransition(Logger &log)
+void NominalBraking::transitionCheck()
 {
-  // We only need to update telemetry data.
-  telemetry_data_ = data_.getTelemetryData();
-  if (checkShutdownCommand(log, telemetry_data_)) { return Off::getInstance(); }
-  return nullptr;
+  data::Navigation nav_data  = data_.getNavigationData();
+  data::StateMachine sm_data = data_.getStateMachineData();
+
+  if (nav_data.velocity <= 0) {
+    log_.INFO("STM", "zero velocity reached");
+
+    sm_data.current_state = data::State::kFinished;
+    data_.setStateMachineData(sm_data);
+
+    state_machine_->current_state_ = state_machine_->finished_;
+    log_.INFO("STM", "Transitioned to 'Finished'");
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  FailureBraking
-//--------------------------------------------------------------------------------------
-
-FailureBraking FailureBraking::instance_;
-data::State FailureBraking::enum_value_       = data::kEmergencyBraking;
-char FailureBraking::string_representation_[] = "FailureBraking";
-
-State *FailureBraking::checkTransition(Logger &log)
+void NominalBraking::checkEmergencyStop()
 {
-  // We only need to update navigation data.
-  nav_data_ = data_.getNavigationData();
-  if (checkPodStopped(log, nav_data_)) { return FailureStopped::getInstance(); }
-  return nullptr;
+  data::EmergencyBrakes embrakes_data = data_.getEmergencyBrakesData();
+  data::StateMachine sm_data          = data_.getStateMachineData();
+  data::Navigation nav_data           = data_.getNavigationData();
+  data::Batteries batteries_data      = data_.getBatteriesData();
+  data::Telemetry telemetry_data      = data_.getTelemetryData();
+  data::Motors motors_data            = data_.getMotorData();
+
+  bool encountered_failure = false;
+
+  if (telemetry_data.emergency_stop_command) {
+    encountered_failure = true;
+    log_.ERR("STM", "STOP command received");
+    telemetry_data.emergency_stop_command = false;
+    data_.setTelemetryData(telemetry_data);
+  } else if (nav_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in navigation");
+  } else if (telemetry_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in telemetry");
+  } else if (motors_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in motors");
+  } else if (embrakes_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in embrakes");
+  } else if (batteries_data.module_status == ModuleStatus::kCriticalFailure) {
+    encountered_failure = true;
+    log_.ERR("STM", "Critical failure in batteries");
+  }
+
+  if (encountered_failure) {
+    log_.ERR("STM", "Engaging emergency brakes");
+    sm_data.current_state = data::State::kEmergencyBraking;
+    data_.setStateMachineData(sm_data);
+    state_machine_->current_state_ = state_machine_->failure_braking_;
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  FailureStopped
-//--------------------------------------------------------------------------------------
+// Finished state
 
-FailureStopped FailureStopped::instance_;
-data::State FailureStopped::enum_value_       = data::kFailureStopped;
-char FailureStopped::string_representation_[] = "FailureStopped";
-
-State *FailureStopped::checkTransition(Logger &log)
+void Finished::transitionCheck()
 {
-  // We only need to update telemetry data.
-  telemetry_data_ = data_.getTelemetryData();
-  if (checkShutdownCommand(log, telemetry_data_)) { return Off::getInstance(); }
-  return nullptr;
+  utils::System &sys             = utils::System::getSystem();
+  data::Telemetry telemetry_data = data_.getTelemetryData();
+
+  if (telemetry_data.shutdown_command) {
+    log_.INFO("STM", "Shutdown command received");
+    log_.INFO("STM", "System is shutting down");
+    sys.running_ = false;
+  }
 }
 
-//--------------------------------------------------------------------------------------
-//  Off
-//--------------------------------------------------------------------------------------
-
-Off Off::instance_;
-
-State *Off::checkTransition(Logger &log)
+void FailureBraking::transitionCheck()
 {
-  log.ERR("STM", "Tried to transition from Off state");
-  return nullptr;
+  data::StateMachine sm_data     = data_.getStateMachineData();
+  data::Navigation nav_data      = data_.getNavigationData();
+
+  if (nav_data.velocity <= 0) {
+    log_.INFO("STM", "zero velocity reached");
+
+    sm_data.current_state = data::State::kFailureStopped;
+    data_.setStateMachineData(sm_data);
+
+    state_machine_->current_state_ = state_machine_->failure_stopped_;
+    log_.INFO("STM", "Transitioned to 'FailureStopped'");
+  }
+}
+
+void FailureStopped::transitionCheck()
+{
+  utils::System &sys             = utils::System::getSystem();
+  data::Telemetry telemetry_data = data_.getTelemetryData();
+
+  if (telemetry_data.shutdown_command) {
+    log_.INFO("STM", "Shutdown command received");
+    log_.INFO("STM", "System is shutting down");
+    sys.running_ = false;
+  }
 }
 
 }  // namespace state_machine

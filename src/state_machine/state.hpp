@@ -1,9 +1,9 @@
 
 /*
- * Authors: Kornelija Sukyte, Franz Miltz
+ * Authors: Kornelija Sukyte
  * Organisation: HYPED
  * Date:
- * Description: Here we declare the general state and the layout of all the specific states. We do not specify actual behaviour.
+ * Description:
  *
  *    Copyright 2020 HYPED
  *    Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,7 +24,6 @@
 
 #include "data/data.hpp"
 #include "state_machine/main.hpp"
-#include "state_machine/transitions.hpp"
 #include "utils/logger.hpp"
 #include "utils/system.hpp"
 #include "utils/timer.hpp"
@@ -40,88 +39,107 @@ class Main;  // Forward declaration
 
 class State {
  public:
-  State();
-  static State *getInstance();
+  State(Logger &log, Main *state_machine);
 
-  virtual void enter(Logger &log) = 0;
-  virtual void exit(Logger &log)  = 0;
+  void checkEmergencyStop();
 
-  virtual State *checkTransition(Logger &log) = 0;
+  virtual void transitionCheck() = 0;
 
+  Logger &log_;
   data::Data &data_;
 
  protected:
-  data::EmergencyBrakes embrakes_data_;
-  data::Navigation nav_data_;
-  data::Batteries batteries_data_;
-  data::Telemetry telemetry_data_;
-  data::Sensors sensors_data_;
-  data::Motors motors_data_;
-  void updateModuleData();
+  Main *state_machine_;
 };
 
-/*
- * @brief   Generates a specific state S following the pattern of State.
- */
-#define MAKE_STATE(S)                                                                              \
-  class S : public State {                                                                         \
-   public:                                                                                         \
-    S() {}                                                                                         \
-    static S *getInstance() { return &S::instance_; }                                              \
-                                                                                                   \
-    State *checkTransition(Logger &log);                                                           \
-    /* @brief   Prints log message and sets appropriate public enum value.*/                       \
-    void enter(Logger &log)                                                                        \
-    {                                                                                              \
-      log.INFO("STM", "Entering %s state", S::string_representation_);                             \
-      data::StateMachine sm_data = data_.getStateMachineData();                                    \
-      sm_data.current_state      = S::enum_value_;                                                 \
-      data_.setStateMachineData(sm_data);                                                          \
-    }                                                                                              \
-    void exit(Logger &log) { log.INFO("STM", "Exiting %s state", S::string_representation_); }     \
-                                                                                                   \
-   private:                                                                                        \
-    static S instance_;                                                                            \
-    /* # converts an argument to a string literal*/                                                \
-    static char string_representation_[];                                                          \
-    static data::State enum_value_;                                                                \
-  };
-
-/*
- * Generating structs for all the states
- */
-
-MAKE_STATE(Idle)            // State on startup
-MAKE_STATE(Calibrating)     // Calibrating starts after user input is given
-MAKE_STATE(Ready)           // After calibration has finished
-MAKE_STATE(Accelerating)    // First phase of the run
-MAKE_STATE(NominalBraking)  // Second phase of the run
-MAKE_STATE(Finished)        // State after the run
-MAKE_STATE(FailureBraking)  // Entered upon failure during the run
-MAKE_STATE(FailureStopped)  // Entered upon failure before the run or after
-                            // FailureBraking
-
-// We need to implement Off separately because it works a bit differently
-class Off : public State {
+class Idling : public State {
  public:
-  Off() {}
-  static Off *getInstance() { return &Off::instance_; }
+  Idling(Logger &log, Main *state_machine) : State(log, state_machine) {}
 
-  State *checkTransition(Logger &log);
+  /*
+   * @brief   Checks for calibration command
+   */
+  void transitionCheck();
+};
 
-  void enter(Logger &log)
-  {
-    log.INFO("STM", "Shutting down");
-    utils::System &sys = utils::System::getSystem();
-    sys.running_       = false;
-  }
+class Calibrating : public State {
+ public:
+  Calibrating(Logger &log, Main *state_machine) : State(log, state_machine) {}
 
-  void exit(Logger &log)
-  {  // We nevere exit this state
-  }
+  /*
+   * @brief   Checks if the calibration has been completed.
+   */
+  void transitionCheck();
+};
 
- private:
-  static Off instance_;
+class Ready : public State {
+ public:
+  Ready(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Checks for launch command
+   */
+  void transitionCheck();
+};
+
+class Accelerating : public State {
+ public:
+  Accelerating(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Checks for critical failure during run.
+   */
+  void checkEmergencyStop();
+
+  /*
+   * @brief   Checks if max distance reached
+   */
+  void transitionCheck();
+};
+
+class NominalBraking : public State {
+ public:
+  NominalBraking(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Checks for critical failure during run.
+   */
+  void checkEmergencyStop();
+
+  /*
+   * @brief   Checks whether the pod has stopped.
+   */
+  void transitionCheck();
+};
+
+class Finished : public State {
+ public:
+  Finished(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Checks if command to shut down was sent
+   */
+  void transitionCheck();
+};
+
+class FailureBraking : public State {
+ public:
+  FailureBraking(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Cheks whether the pod has stopped.
+   */
+  void transitionCheck();
+};
+
+class FailureStopped : public State {
+ public:
+  FailureStopped(Logger &log, Main *state_machine) : State(log, state_machine) {}
+
+  /*
+   * @brief   Checks if command to stop was sent
+   */
+  void transitionCheck();
 };
 
 }  // namespace state_machine

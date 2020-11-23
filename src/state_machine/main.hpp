@@ -1,10 +1,11 @@
 /*
- * Author: Kornelija Sukyte, Franz Miltz
+ * Author: Kornelija Sukyte
  * Organisation: HYPED
  * Date:
- * Description: Main is the state machine. This is where all the state is stored and how we interact
- * with the rest of HYPED. The SM only provides a frame work though, the actual logic is implemented
- * in the other files.
+ * Description:
+ * Main instantiates HypedMachine. It also monitors other data and generates Events
+ * for the HypedMachine. Note, StateMachine structure in Data is not updated here but
+ * in HypedMachine.
  *
  *    Copyright 2020 HYPED
  *    Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,36 +25,43 @@
 #define STATE_MACHINE_MAIN_HPP_
 
 #include <cstdint>
-
-#include "data/data.hpp"
-#include "state_machine/state.hpp"
 #include "utils/concurrent/thread.hpp"
-#include "utils/config.hpp"
+#include "data/data.hpp"
 #include "utils/system.hpp"
+#include "state_machine/state.hpp"
+#include "utils/config.hpp"
 
 namespace hyped {
 
-using data::ModuleStatus;
-using utils::Logger;
 using utils::concurrent::Thread;
+using utils::Logger;
+using data::ModuleStatus;
 
 namespace state_machine {
 
-class State;  // Forward declaration
-
-class Main : public Thread {
+class Idling;
+class Calibrating;
+class State;
+class Ready;
+class Accelerating;
+class NominalBraking;
+class Finished;
+class FailureBraking;
+class FailureStopped;
+class Main: public Thread {
  public:
-  explicit Main(uint8_t id, Logger &log);
-
-  /**
-   *  @brief  Runs state machine thread.
-   */
+  explicit Main(uint8_t id, Logger& log);
   void run() override;
 
-  /*
-   * @brief  Current state of the pod
-   */
-  State *current_state_;
+  State          *current_state_;
+  Idling         *idling_;
+  Calibrating    *calibrating_;
+  Ready          *ready_;
+  Accelerating   *accelerating_;
+  NominalBraking *nominal_braking_;
+  Finished       *finished_;
+  FailureBraking *failure_braking_;
+  FailureStopped *failure_stopped_;
 };
 
 }  // namespace state_machine
