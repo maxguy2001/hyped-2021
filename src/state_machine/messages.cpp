@@ -51,8 +51,6 @@ const char Messages::kShutdownCommandLog[] = "Shutdown command received";
 
 const char Messages::kBrakingZoneLog[] = "Entered braking zone";
 
-const char Messages::kPodStoppedLog[] = "The pod has stopped";
-
 const char Messages::kShutdownLog[] = "Shutting down";
 
 const char Messages::kEnteringStateFormat[] = "Entering %s state";

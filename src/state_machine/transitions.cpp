@@ -128,17 +128,6 @@ bool checkEnteredBrakingZone(Logger &log, Navigation &nav_data)
   return true;
 }
 
-/*
- * @brief    Returns true if the pod has stopped moving.
- */
-bool checkPodStopped(Logger &log, Navigation &nav_data)
-{
-  if (nav_data.velocity > 0) return false;
-
-  log.INFO(Messages::kStmLoggingIdentifier, Messages::kPodStoppedLog);
-  return true;
-}
-
 }  // namespace state_machine
 
 }  // namespace hyped

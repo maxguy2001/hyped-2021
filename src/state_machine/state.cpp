@@ -124,32 +124,11 @@ State *Accelerating::checkTransition(Logger &log)
 
   bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
                                   sensors_data_, motors_data_);
-  if (emergency) { return FailureBraking::getInstance(); }
+  if (emergency) { return FailureStopped::getInstance(); }
 
   bool in_braking_zone = checkEnteredBrakingZone(log, nav_data_);
-  if (in_braking_zone) { return NominalBraking::getInstance(); }
+  if (in_braking_zone) { return Finished::getInstance(); }
 
-  return nullptr;
-}
-
-//--------------------------------------------------------------------------------------
-//  Nominal Braking
-//--------------------------------------------------------------------------------------
-
-NominalBraking NominalBraking::instance_;
-data::State NominalBraking::enum_value_       = data::kNominalBraking;
-char NominalBraking::string_representation_[] = "NominalBraking";
-
-State *NominalBraking::checkTransition(Logger &log)
-{
-  updateModuleData();
-
-  bool emergency = checkEmergency(log, embrakes_data_, nav_data_, batteries_data_, telemetry_data_,
-                                  sensors_data_, motors_data_);
-  if (emergency) { return FailureBraking::getInstance(); }
-
-  bool stopped = checkPodStopped(log, nav_data_);
-  if (stopped) { return Finished::getInstance(); }
   return nullptr;
 }
 
@@ -166,22 +145,6 @@ State *Finished::checkTransition(Logger &log)
   // We only need to update telemetry data.
   telemetry_data_ = data_.getTelemetryData();
   if (checkShutdownCommand(log, telemetry_data_)) { return Off::getInstance(); }
-  return nullptr;
-}
-
-//--------------------------------------------------------------------------------------
-//  FailureBraking
-//--------------------------------------------------------------------------------------
-
-FailureBraking FailureBraking::instance_;
-data::State FailureBraking::enum_value_       = data::kEmergencyBraking;
-char FailureBraking::string_representation_[] = "FailureBraking";
-
-State *FailureBraking::checkTransition(Logger &log)
-{
-  // We only need to update navigation data.
-  nav_data_ = data_.getNavigationData();
-  if (checkPodStopped(log, nav_data_)) { return FailureStopped::getInstance(); }
   return nullptr;
 }
 

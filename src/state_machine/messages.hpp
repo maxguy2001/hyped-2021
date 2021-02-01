@@ -69,9 +69,6 @@ struct Messages {
   // Sent upon entering braking zone
   static const char kBrakingZoneLog[];
 
-  // Sent upon determining that the pod has stopped
-  static const char kPodStoppedLog[];
-
   // Sent upon shutting down system (entering Off state)
   static const char kShutdownLog[];
 
