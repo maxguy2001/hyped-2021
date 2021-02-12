@@ -56,6 +56,9 @@ bool checkEmergency(Logger &log, EmergencyBrakes embrakes_data, Navigation nav_d
   } else if (batteries_data.module_status == ModuleStatus::kCriticalFailure) {
     log.ERR(Messages::kStmLoggingIdentifier, Messages::kCriticalBatteriesLog);
     return true;
+  } else if (sensors_data.module_status == ModuleStatus::kCriticalFailure) {
+    log.ERR("STM", "Critical failure in sensors");
+    return true;
   }
   return false;
 }
@@ -68,8 +71,6 @@ bool checkModulesInitialised(Logger &log, EmergencyBrakes embrakes_data, Navigat
                              Batteries batteries_data, Telemetry telemetry_data,
                              Sensors sensors_data, Motors motors_data)
 {
-  if (!telemetry_data.calibrate_command) return false;
-
   if (embrakes_data.module_status != ModuleStatus::kInit) return false;
   if (nav_data.module_status != ModuleStatus::kInit) return false;
   if (batteries_data.module_status != ModuleStatus::kInit) return false;
@@ -98,6 +99,13 @@ bool checkModulesReady(Logger &log, EmergencyBrakes embrakes_data, Navigation na
 // Telemetry Commands
 //--------------------------------------------------------------------------------------
 
+bool checkCalibrateCommand(Logger &log, Telemetry telemetry_data)
+{
+  if (!telemetry_data.calibrate_command) return false;
+
+  log.INFO("STM", "Launch command received");
+  return true;
+}
 bool checkLaunchCommand(Logger &log, Telemetry telemetry_data)
 {
   if (!telemetry_data.launch_command) return false;
@@ -123,6 +131,17 @@ bool checkEnteredBrakingZone(Logger &log, Navigation &nav_data)
   float remaining_distance = nav_data.run_length - nav_data.displacement;
   float required_distance  = nav_data.braking_distance + nav_data.braking_buffer;
   if (remaining_distance > required_distance) return false;
+
+  log.INFO(Messages::kStmLoggingIdentifier, Messages::kBrakingZoneLog);
+  return true;
+}
+
+// Only for testing purposes.
+bool checkEnteredBrakingZoneTestValue(Logger &log, float displacement_test)
+{
+  float remaining_distance_test = 1250 - displacement_test;
+  float required_distance_test  = 750 + 20;
+  if (remaining_distance_test > required_distance_test) return false;
 
   log.INFO(Messages::kStmLoggingIdentifier, Messages::kBrakingZoneLog);
   return true;
